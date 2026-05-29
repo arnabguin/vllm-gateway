@@ -1,0 +1,201 @@
+{
+  "annotations": { "list": [] },
+  "description": "Live gateway and vLLM metrics from Prometheus only. Nothing on this dashboard reads ClickHouse.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "title": "ClickHouse dashboard",
+      "type": "link",
+      "url": "/d/clickhouse-attribution",
+      "keepTime": true
+    }
+  ],
+  "panels": [
+    {
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "options": {
+        "code": { "language": "plaintext", "showLineNumbers": false, "showMiniMap": false },
+        "content": "### Prometheus only\nMetrics are exposed on the gateway at `GET /v1/metrics` and scraped by Prometheus every **5s** (`monitoring/prometheus.yml`).\n\nIn-memory structures (counters, quantile streams) are mirrored into Prometheus on the hot path; this dashboard does **not** use ClickHouse tables or the 15s emit flush.",
+        "mode": "markdown"
+      },
+      "title": "About this dashboard",
+      "type": "text"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "**Source:** `TotalCounter` → Prometheus cumulative counter `gateway_total_requests{team_id}` (in-memory window map is separate and used only for ClickHouse).\n\n**Dump / scrape interval:** Counter updated on each completed proxy request. Prometheus scrape every **5s**. Panel uses `rate(...[1m])`.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "reqps" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 1,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (team_id) (rate(gateway_total_requests[1m]))",
+          "legendFormat": "{{team_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Request rate by team",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "**Source:** `ActiveCounter` → Prometheus gauge `gateway_inflight_requests{team_id}` (inc on proxy entry, dec on exit).\n\n**Dump / scrape interval:** Real-time gauge; scraped every **5s**. Not written to ClickHouse.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 2,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (team_id) (gateway_inflight_requests)",
+          "legendFormat": "{{team_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "In-flight requests by team",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "**Source:** `LatencyRegistry` (quantile stream) → sample observer → Prometheus histogram `gateway_request_latency_bucket{team_id}` (end-to-end proxy latency in ms).\n\n**Dump / scrape interval:** One histogram observation per completed request. Scraped every **5s**. Panel: `histogram_quantile` over **5m** rate windows (not the 15s ClickHouse emit).",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "ms" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 3,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum by (le, team_id) (rate(gateway_request_latency_bucket[5m])))",
+          "legendFormat": "p50 {{team_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le, team_id) (rate(gateway_request_latency_bucket[5m])))",
+          "legendFormat": "p95 {{team_id}}",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum by (le, team_id) (rate(gateway_request_latency_bucket[5m])))",
+          "legendFormat": "p99 {{team_id}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Gateway latency percentiles",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "**Source:** `TTFT` `LatencyRegistry` → Prometheus histogram `gateway_request_ttft_bucket{team_id}` (only when streaming sets ttft_ms > 0).\n\n**Dump / scrape interval:** Per request when TTFT recorded; scrape **5s**. Non-streaming traffic leaves this empty today.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "ms" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 4,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le, team_id) (rate(gateway_request_ttft_bucket[5m])))",
+          "legendFormat": "p95 TTFT {{team_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Time to first token (p95)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 },
+      "id": 10,
+      "title": "vLLM process metrics (Prometheus scrape of mock-vllm / vLLM)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "**Source:** vLLM Prometheus exposition `vllm:num_requests_running` (job `mock-vllm`, not the gateway binary).\n\n**Dump / scrape interval:** Prometheus scrape every **5s**. A copy is also inserted into ClickHouse `vllm_system_metrics` every **15s** (see ClickHouse dashboard).",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
+      "id": 5,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "vllm:num_requests_running",
+          "legendFormat": "running",
+          "refId": "A"
+        }
+      ],
+      "title": "vLLM running requests",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "**Source:** vLLM gauge `vllm:num_requests_waiting` (queue depth).\n\n**Dump / scrape interval:** Prometheus scrape every **5s**. ClickHouse copy every **15s** in `vllm_system_metrics.queue_depth`.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
+      "id": 6,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "vllm:num_requests_waiting",
+          "legendFormat": "waiting",
+          "refId": "A"
+        }
+      ],
+      "title": "vLLM queue depth (waiting)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["vllm-gateway", "prometheus"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timezone": "browser",
+  "title": "Prometheus — Gateway & vLLM (live)",
+  "uid": "prometheus-gateway",
+  "version": 1
+}

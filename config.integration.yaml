@@ -1,0 +1,14 @@
+gateway:
+  listen_addr: ":8080"
+  enable_debug_emit: true
+vllm:
+  url: "http://mock-vllm:8000"
+  metrics_scrape_interval: "15s"
+clickhouse:
+  addr: "clickhouse:9000"
+  database: "vllm_attribution"
+  username: "default"
+  password: "devpassword"
+metrics:
+  # Periodic emit off in e2e; tests flush via POST /debug/emit-request-metrics.
+  emit_interval: "0"

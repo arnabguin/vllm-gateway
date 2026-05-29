@@ -1,0 +1,19 @@
+# Copy to config.yaml and adjust for your environment.
+# The committed config.yaml uses dev-only defaults for local Docker Compose.
+
+gateway:
+  listen_addr: ":8080"
+vllm:
+  url: "http://127.0.0.1:8000"
+  metrics_scrape_interval: "15s"
+clickhouse:
+  addr: "127.0.0.1:9000"
+  database: "vllm_attribution"
+  username: "default"
+  password: "changeme"
+metrics:
+  emit_interval: "15s"
+pricing:
+  llama-3-8b:
+    prompt: 0.0001
+    completion: 0.0002

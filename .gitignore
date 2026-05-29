@@ -1,0 +1,38 @@
+# Binaries
+/gateway
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Local overrides (keep config.yaml in repo for dev; override locally if needed)
+.env
+.env.*
+!.env.example
+config.local.yaml
+config.*.local.yaml
+
+# Logs
+*.log
+
+# IDE / OS
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Docker / observability runtime data (if volumes bind-mount locally)
+grafana_data/

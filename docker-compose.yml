@@ -1,0 +1,110 @@
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse
+    ports:
+      - "9000:9000"
+      - "8123:8123"
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: devpassword
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--user", "default", "--password", "devpassword", "--query", "SELECT 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  mock-vllm:
+    image: python:3.12-alpine
+    container_name: mock-vllm
+    working_dir: /app
+    volumes:
+      - ./scripts/mock_vllm.py:/app/mock_vllm.py:ro
+    environment:
+      MOCK_BIND: "0.0.0.0"
+      MOCK_PORT: "8000"
+    command: ["python", "/app/mock_vllm.py"]
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/models')"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  gateway:
+    build: .
+    container_name: vllm-gateway
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.docker.yaml:/config.yaml:ro
+    command: ["/gateway", "--config=/config.yaml"]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      mock-vllm:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: vllm-gateway-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - gateway
+      - mock-vllm
+      - clickhouse
+
+  simulator:
+    profiles: ["simulator"]
+    image: python:3.12-alpine
+    container_name: vllm-gateway-simulator
+    working_dir: /app
+    volumes:
+      - ./scripts/load_simulator.py:/app/load_simulator.py:ro
+    environment:
+      GATEWAY_URL: "http://gateway:8080"
+      SIM_TEAM_PREFIX: "sim-team"
+      SIM_MODEL: "mock-model"
+      SIM_INTERVAL: "2"
+      SIM_TEAMS: "5"
+      SIM_STREAM: "${SIM_STREAM:-0}"
+    command: ["python", "/app/load_simulator.py"]
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: vllm-gateway-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - clickhouse
+
+volumes:
+  prometheus_data:
+  grafana_data:

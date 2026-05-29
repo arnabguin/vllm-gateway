@@ -1,0 +1,53 @@
+# Isolated stack for end-to-end integration tests (ports avoid clashing with dev compose).
+name: vllm-gateway-e2e
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "19000:9000"
+      - "18123:8123"
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: devpassword
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--user", "default", "--password", "devpassword", "--query", "SELECT 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  mock-vllm:
+    image: python:3.12-alpine
+    working_dir: /app
+    volumes:
+      - ./scripts/mock_vllm.py:/app/mock_vllm.py:ro
+    environment:
+      MOCK_BIND: "0.0.0.0"
+      MOCK_PORT: "8000"
+      MOCK_DELAY_MS: "5"
+      MOCK_THREADED: "1"
+      MOCK_STREAM_TTFT_MS: "50"
+      MOCK_STREAM_CHUNK_DELAY_MS: "10"
+    command: ["python", "/app/mock_vllm.py"]
+    ports:
+      - "18000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/models')"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  gateway:
+    build: .
+    ports:
+      - "18080:8080"
+    volumes:
+      - ./config.integration.yaml:/config.yaml:ro
+    command: ["/gateway", "--config=/config.yaml"]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      mock-vllm:
+        condition: service_healthy

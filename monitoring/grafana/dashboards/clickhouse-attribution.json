@@ -1,0 +1,257 @@
+{
+  "annotations": { "list": [] },
+  "description": "Durable attribution and rollups from ClickHouse only. Nothing on this dashboard reads Prometheus.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "title": "Prometheus dashboard",
+      "type": "link",
+      "url": "/d/prometheus-gateway",
+      "keepTime": true
+    }
+  ],
+  "panels": [
+    {
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "options": {
+        "code": { "language": "plaintext", "showLineNumbers": false, "showMiniMap": false },
+        "content": "### ClickHouse only\nDatabase: `vllm_attribution`. Per-request rows land in **`request_events`** immediately. Window rollups land in **`request_metrics`** every **15s** (`metrics.emit_interval`). vLLM scrape rows land in **`vllm_system_metrics`** every **15s** (`vllm.metrics_scrape_interval`).\n\nFor live gauges and histograms, use the **Prometheus** dashboard.",
+        "mode": "markdown"
+      },
+      "title": "About this dashboard",
+      "type": "text"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "description": "**Source:** ClickHouse table `request_events` — one INSERT per completed proxy request (`team_id` from `X-Team-ID`).\n\n**Dump interval:** Immediate per request (not batched). Counts are `count()` per Grafana time bucket.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 1,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT\n  $__timeInterval(timestamp) AS time,\n  team_id,\n  count() AS requests\nFROM request_events\nWHERE $__timeFilter(timestamp)\nGROUP BY time, team_id\nORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Requests per team",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "description": "**Source:** ClickHouse `request_events` columns `prompt_tokens`, `completion_tokens` (parsed from vLLM JSON response).\n\n**Dump interval:** Per request, immediate INSERT.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 2,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT\n  $__timeInterval(timestamp) AS time,\n  team_id,\n  sum(prompt_tokens) AS prompt_tokens,\n  sum(completion_tokens) AS completion_tokens\nFROM request_events\nWHERE $__timeFilter(timestamp)\nGROUP BY time, team_id\nORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Token usage by team",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "description": "**Source:** ClickHouse `request_events` — `sum(prompt_tokens + completion_tokens)` for the dashboard time range.\n\n**Dump interval:** Per request; panel aggregates across your selected time picker.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 12 },
+      "id": 3,
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT\n  team_id,\n  sum(prompt_tokens + completion_tokens) AS total_tokens\nFROM request_events\nWHERE $__timeFilter(timestamp)\nGROUP BY team_id\nORDER BY total_tokens DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Total tokens in range (by team)",
+      "type": "bargauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "id": 20,
+      "title": "15s emit window — request_metrics",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "description": "**Source:** `LatencyRegistry` quantile stream → flushed to ClickHouse `request_metrics` as `latency_p50_ms`, `latency_p95_ms`, `latency_p99_ms` (not read from Prometheus here).\n\n**Dump interval:** Every **15s** per team; stream reset after flush (`metrics.emit_interval`). One point per emit per team.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "ms" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 19 },
+      "id": 4,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT\n  timestamp AS time,\n  team_id,\n  latency_p50_ms AS p50,\n  latency_p95_ms AS p95,\n  latency_p99_ms AS p99\nFROM request_metrics\nWHERE $__timeFilter(timestamp)\nORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Latency percentiles (emit windows)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "description": "**Source:** `LatencyRegistry` TTFT stream → flushed to `request_metrics.ttft_p50_ms`, `ttft_p95_ms`, `ttft_p99_ms`.\n\n**Dump interval:** Every **15s** per team. Non-streaming requests keep `ttft_ms = 0` and do not add TTFT samples.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "ms" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 19 },
+      "id": 8,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT\n  timestamp AS time,\n  team_id,\n  ttft_p50_ms AS p50,\n  ttft_p95_ms AS p95,\n  ttft_p99_ms AS p99\nFROM request_metrics\nWHERE $__timeFilter(timestamp)\nORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "TTFT percentiles (emit windows)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "description": "**Source:** `TotalCounter` in-memory window map → `request_metrics.total_requests` at flush (separate from Prometheus cumulative `gateway_total_requests`).\n\n**Dump interval:** Every **15s**; window counter reset after INSERT. Prometheus counter is unchanged.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 19 },
+      "id": 5,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT\n  timestamp AS time,\n  team_id,\n  total_requests\nFROM request_metrics\nWHERE $__timeFilter(timestamp)\nORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Requests per emit window",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "id": 21,
+      "title": "15s scrape — vllm_system_metrics",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "description": "**Source:** ClickHouse `vllm_system_metrics` — gateway scrapes vLLM `/metrics` and inserts `running_requests`, `queue_depth`.\n\n**Dump interval:** Every **15s** (`vllm.metrics_scrape_interval`). Not per-team.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "id": 6,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "SELECT\n  timestamp AS time,\n  running_requests,\n  queue_depth\nFROM vllm_system_metrics\nWHERE $__timeFilter(timestamp)\nORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Running vs queue depth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "description": "**Source:** ClickHouse `request_events` — per-row `latency_ms` and `ttft_ms` (TTFT > 0 only for `stream: true`).\n\n**Dump interval:** Per request, immediate INSERT.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" } }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "id": 7,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "SELECT\n  timestamp,\n  team_id,\n  model,\n  prompt_tokens,\n  completion_tokens,\n  latency_ms,\n  ttft_ms,\n  status_code\nFROM request_events\nWHERE $__timeFilter(timestamp)\nORDER BY timestamp DESC\nLIMIT 50",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent request events",
+      "type": "table"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["vllm-gateway", "clickhouse"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "title": "ClickHouse — Attribution & history",
+  "uid": "clickhouse-attribution",
+  "version": 1
+}

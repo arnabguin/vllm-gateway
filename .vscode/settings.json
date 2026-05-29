@@ -1,0 +1,21 @@
+{
+  "go.useLanguageServer": true,
+  "go.toolsManagement.autoUpdate": true,
+  "go.alternateTools": {
+    "gopls": "/Users/arnabguin/go/bin/gopls"
+  },
+  "gopls": {
+    "hoverKind": "FullDocumentation",
+    "usePlaceholders": true,
+    "build.buildFlags": ["-tags=integration"]
+  },
+  "editor.hover.enabled": true,
+  "editor.parameterHints.enabled": true,
+  "editor.quickSuggestions": {
+    "comments": "off",
+    "strings": "off",
+    "other": "on"
+  },
+  "editor.suggestOnTriggerCharacters": true
+}
+
