@@ -9,6 +9,7 @@ Endpoints:
   GET  /v1/models            — health checks
   POST /v1/completions       — legacy completion + usage
   POST /v1/chat/completions  — chat completion + usage
+  POST /v1/embeddings        — embeddings + usage
 
 Streaming (stream: true in JSON body):
   MOCK_STREAM_TTFT_MS         — delay before first content chunk (default 50)
@@ -36,6 +37,7 @@ COMPLETION_PROMPT_TOKENS = 12
 COMPLETION_COMPLETION_TOKENS = 7
 CHAT_PROMPT_TOKENS = 15
 CHAT_COMPLETION_TOKENS = 8
+EMBEDDING_PROMPT_TOKENS = 20
 
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
@@ -140,6 +142,30 @@ vllm:num_requests_waiting 5
                         },
                     },
                 )
+            return
+
+        if self.path == "/v1/embeddings":
+            if stream:
+                self.send_error(400, "streaming not supported for embeddings")
+                return
+            self._json_response(
+                200,
+                {
+                    "object": "list",
+                    "model": MODEL_ID,
+                    "data": [
+                        {
+                            "object": "embedding",
+                            "index": 0,
+                            "embedding": [0.01, 0.02, 0.03],
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": EMBEDDING_PROMPT_TOKENS,
+                        "total_tokens": EMBEDDING_PROMPT_TOKENS,
+                    },
+                },
+            )
             return
 
         self.send_error(404)
