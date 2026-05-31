@@ -11,12 +11,13 @@ import (
 )
 
 const (
-	e2eMockModel                = "mock-model"
-	e2eMockPromptTokens         = uint32(12)
-	e2eMockCompletionTokens     = uint32(7)
-	e2eMockChatPromptTokens     = uint32(15)
-	e2eMockChatCompletionTokens = uint32(8)
-	e2eMockStatusCode           = uint16(200)
+	e2eMockModel                 = "mock-model"
+	e2eMockPromptTokens          = uint32(12)
+	e2eMockCompletionTokens      = uint32(7)
+	e2eMockChatPromptTokens      = uint32(15)
+	e2eMockChatCompletionTokens  = uint32(8)
+	e2eMockEmbeddingPromptTokens = uint32(20)
+	e2eMockStatusCode            = uint16(200)
 )
 
 type chRequestEvent struct {
@@ -267,6 +268,37 @@ func assertStreamChatRequestEventsExact(t *testing.T, events []chRequestEvent, t
 func assertStreamCompletionsRequestEventsExact(t *testing.T, events []chRequestEvent, teamID string, wantCount int) {
 	t.Helper()
 	assertStreamRequestEventsExact(t, events, teamID, wantCount, e2eMockPromptTokens, e2eMockCompletionTokens)
+}
+
+func assertEmbeddingRequestEventsExact(t *testing.T, events []chRequestEvent, teamID string, wantCount int) {
+	t.Helper()
+	if len(events) != wantCount {
+		t.Fatalf("team %q request_events rows: got %d want %d", teamID, len(events), wantCount)
+	}
+	for i, e := range events {
+		prefix := fmt.Sprintf("team %q embedding request_events[%d]", teamID, i)
+		if e.TeamID != teamID {
+			t.Fatalf("%s team_id: got %q want %q", prefix, e.TeamID, teamID)
+		}
+		if e.Model != e2eMockModel {
+			t.Fatalf("%s model: got %q want %q", prefix, e.Model, e2eMockModel)
+		}
+		if e.PromptTokens != e2eMockEmbeddingPromptTokens {
+			t.Fatalf("%s prompt_tokens: got %d want %d", prefix, e.PromptTokens, e2eMockEmbeddingPromptTokens)
+		}
+		if e.CompletionTokens != 0 {
+			t.Fatalf("%s completion_tokens: got %d want 0", prefix, e.CompletionTokens)
+		}
+		if e.LatencyMS == 0 {
+			t.Fatalf("%s latency_ms: got 0 want > 0", prefix)
+		}
+		if e.TTFTMS != 0 {
+			t.Fatalf("%s ttft_ms: got %d want 0", prefix, e.TTFTMS)
+		}
+		if e.StatusCode != e2eMockStatusCode {
+			t.Fatalf("%s status_code: got %d want %d", prefix, e.StatusCode, e2eMockStatusCode)
+		}
+	}
 }
 
 func assertStreamRequestEventsExact(t *testing.T, events []chRequestEvent, teamID string, wantCount int, wantPrompt, wantCompletion uint32) {

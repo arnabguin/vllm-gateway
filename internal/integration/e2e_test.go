@@ -178,6 +178,26 @@ func TestGatewayStreamingE2E(t *testing.T) {
 	}
 }
 
+func TestGatewayEmbeddingsE2E(t *testing.T) {
+	runID := time.Now().UnixNano()
+	teamID := fmt.Sprintf("e2e-embed-%d", runID)
+	const requests = 1
+
+	waitForHTTP200(t, e2eGatewayURL+"/health", 30*time.Second)
+	if err := postEmbeddingErr(e2eGatewayURL, teamID); err != nil {
+		t.Fatal(err)
+	}
+
+	conn := openClickHouse(t)
+	defer conn.Close()
+
+	waitForEventCountExact(t, conn, teamID, requests, 30*time.Second)
+	events := fetchRequestEvents(t, conn, teamID)
+	assertEmbeddingRequestEventsExact(t, events, teamID, requests)
+
+	waitForInflightGaugeZero(t, e2eGatewayURL+"/v1/metrics", []string{teamID}, 5*time.Second)
+}
+
 func waitForEventCountExact(t *testing.T, conn driver.Conn, teamID string, want int, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -383,6 +403,29 @@ func postCompletionErr(gatewayURL, teamID string) error {
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("completion status=%d body=%s", resp.StatusCode, body)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+func postEmbeddingErr(gatewayURL, teamID string) error {
+	req, err := http.NewRequest(http.MethodPost, gatewayURL+"/v1/embeddings", strings.NewReader(
+		`{"model":"mock-model","input":"hello"}`,
+	))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Team-ID", teamID)
+
+	resp, err := e2eHTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("embedding status=%d body=%s", resp.StatusCode, body)
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
