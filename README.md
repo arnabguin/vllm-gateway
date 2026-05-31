@@ -4,7 +4,7 @@ A lightweight Go reverse proxy in front of [vLLM](https://github.com/vllm-projec
 
 ## What it does
 
-- Proxies OpenAI-style **`POST /v1/completions`** and **`POST /v1/chat/completions`** (buffered and **`stream: true`** with time-to-first-token)
+- Proxies OpenAI-style **`POST /v1/completions`**, **`POST /v1/chat/completions`**, and **`POST /v1/embeddings`** (completions/chat support buffered and **`stream: true`** with time-to-first-token)
 - Requires **`X-Team-ID`** (optional `X-Project`, `X-User-ID`)
 - Records per-request token usage, latency, and **`ttft_ms`** in **`request_events`**
 - Flushes per-team latency and TTFT percentiles to **`request_metrics`** every **`metrics.emit_interval`** (default 15s)
@@ -15,7 +15,7 @@ A lightweight Go reverse proxy in front of [vLLM](https://github.com/vllm-projec
 
 | Area | Details |
 |------|---------|
-| Proxy paths | `/v1/completions`, `/v1/chat/completions` |
+| Proxy paths | `/v1/completions`, `/v1/chat/completions`, `/v1/embeddings` |
 | Streaming | SSE relay, first-content TTFT, usage on final chunks |
 | Storage | `request_events`, `request_metrics`, `vllm_system_metrics` |
 | Observability | Gateway Prometheus metrics; provisioned Grafana dashboards |
@@ -140,6 +140,15 @@ curl -s -X POST http://127.0.0.1:8080/v1/completions \
 
 Missing team header → **400**. Gateway up, mock down → **503** on `/health`.
 
+Embeddings (non-streaming only; `prompt_tokens` recorded, `completion_tokens = 0`):
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -H "X-Team-ID: engineering" \
+  -d '{"model":"mock-model","input":"hello"}'
+```
+
 ### 5. Streaming and TTFT (optional)
 
 Streaming records **`ttft_ms`** on the first content token (role-only chat deltas do not count). Non-streaming requests keep `ttft_ms = 0`.
@@ -227,7 +236,7 @@ Stop: `docker compose down`
 
 ### Load simulator (optional sidecar)
 
-`scripts/load_simulator.py` sends `POST /v1/completions` (or chat) on a fixed interval, rotating across teams (`sim-team-1`, `sim-team-2`, …). Use `--stream` / `SIM_STREAM=1` for SSE (`stream: true`) to populate TTFT metrics in Grafana.
+`scripts/load_simulator.py` sends `POST /v1/completions`, `/v1/chat/completions`, or `/v1/embeddings` on a fixed interval, rotating across teams (`sim-team-1`, `sim-team-2`, …). Use `--stream` / `SIM_STREAM=1` for SSE (`stream: true`) on completion paths to populate TTFT metrics in Grafana (ignored for embeddings).
 
 **Docker** (with the stack already up):
 
@@ -237,12 +246,13 @@ docker compose --profile simulator up -d simulator
 docker compose logs -f simulator
 ```
 
-Defaults: **2s** interval, **5** teams (`SIM_INTERVAL` / `SIM_TEAMS` in `docker-compose.yml`). Override or run locally:
+Defaults: **2s** interval, **5** teams, **`/v1/completions`** (`SIM_INTERVAL` / `SIM_TEAMS` / `SIM_PATH` in `docker-compose.yml`). Override or run locally:
 
 ```bash
 python3 scripts/load_simulator.py --interval 2 --teams 5
 python3 scripts/load_simulator.py -i 1 -n 3 --once   # one request per team, then exit
 python3 scripts/load_simulator.py --stream --path /v1/chat/completions -i 2 -n 5
+python3 scripts/load_simulator.py --path /v1/embeddings -i 2 -n 5
 ```
 
 | Flag | Meaning |
@@ -250,8 +260,8 @@ python3 scripts/load_simulator.py --stream --path /v1/chat/completions -i 2 -n 5
 | `-i` / `--interval` | Seconds between requests |
 | `-n` / `--teams` | Number of teams (`sim-team-1` … `sim-team-N`) |
 | `--gateway-url` | Base URL (default `http://127.0.0.1:8080`, or `GATEWAY_URL` in Docker) |
-| `--path` | `/v1/completions` or `/v1/chat/completions` |
-| `--stream` | `stream: true` + drain SSE; logs client-side `ttft=` (or `SIM_STREAM=1`) |
+| `--path` | `/v1/completions`, `/v1/chat/completions`, or `/v1/embeddings` (or `SIM_PATH`) |
+| `--stream` | `stream: true` + drain SSE; logs client-side `ttft=` (or `SIM_STREAM=1`; not used for embeddings) |
 | `--once` | One request per team, then exit |
 
 Stop simulator only: `docker compose --profile simulator stop simulator`
