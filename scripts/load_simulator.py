@@ -5,10 +5,12 @@ Steady-rate gateway load simulator for dashboard / e2e dev.
   python3 scripts/load_simulator.py --interval 2 --teams 5
   python3 scripts/load_simulator.py --gateway-url http://127.0.0.1:8080 -i 1 -n 3
   python3 scripts/load_simulator.py --stream --path /v1/chat/completions
+  python3 scripts/load_simulator.py --path /v1/embeddings -i 2 -n 5
 
 In Docker Compose (profile simulator):
   docker compose --profile simulator up -d simulator
   SIM_STREAM=1 docker compose --profile simulator up -d simulator
+  SIM_PATH=/v1/embeddings docker compose --profile simulator up -d simulator
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ def env_flag(name: str) -> bool:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Send completion requests to the vLLM gateway on a fixed interval, rotating across teams.",
+        description="Send inference requests to the vLLM gateway on a fixed interval, rotating across teams.",
     )
     p.add_argument(
         "-i",
@@ -66,9 +68,9 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--path",
-        default="/v1/completions",
-        choices=("/v1/completions", "/v1/chat/completions"),
-        help="Upstream path to hit (default: /v1/completions)",
+        default=os.environ.get("SIM_PATH", "/v1/completions"),
+        choices=("/v1/completions", "/v1/chat/completions", "/v1/embeddings"),
+        help="Upstream path to hit (default: /v1/completions, or SIM_PATH env)",
     )
     p.add_argument(
         "--stream",
@@ -119,12 +121,19 @@ def request_body(path: str, team_id: str, model: str, stream: bool) -> dict:
             "messages": [{"role": "user", "content": f"ping from {team_id}"}],
             "max_tokens": 10,
         }
-    else:
+    elif path == "/v1/completions":
         body = {
             "model": model,
             "prompt": f"ping from {team_id}",
             "max_tokens": 10,
         }
+    elif path == "/v1/embeddings":
+        body = {
+            "model": model,
+            "input": f"hello from {team_id}",
+        }
+    else:
+        raise ValueError(f"unsupported path: {path}")
     if stream:
         body["stream"] = True
     return body
@@ -149,24 +158,29 @@ def consume_sse_stream(resp, path: str) -> tuple[float | None, float]:
     return ttft, time.perf_counter() - start
 
 
+def use_stream(path: str, stream: bool) -> bool:
+    return stream and path != "/v1/embeddings"
+
+
 def send_request(
     base: str, path: str, team_id: str, model: str, stream: bool
 ) -> tuple[int, float, float | None]:
     """Returns (status, total_elapsed_seconds, ttft_seconds or None)."""
     url = base.rstrip("/") + path
-    body = request_body(path, team_id, model, stream)
+    streaming = use_stream(path, stream)
+    body = request_body(path, team_id, model, streaming)
     data = json.dumps(body).encode()
     headers = {
         "Content-Type": "application/json",
         "X-Team-ID": team_id,
     }
-    if stream:
+    if streaming:
         headers["Accept"] = "text/event-stream"
 
     req = urllib.request.Request(url, data=data, method="POST", headers=headers)
     start = time.perf_counter()
     with urllib.request.urlopen(req, timeout=60) as resp:
-        if stream:
+        if streaming:
             ttft, elapsed = consume_sse_stream(resp, path)
             return resp.status, elapsed, ttft
         return resp.status, time.perf_counter() - start, None
@@ -180,8 +194,15 @@ def main() -> None:
     teams = team_ids(args.team_prefix, args.teams)
     wait_for_gateway(args.gateway_url, args.warmup_timeout)
 
+    streaming = use_stream(args.path, args.stream)
+    if args.stream and not streaming:
+        print(
+            "[simulator] warning: --stream / SIM_STREAM ignored for /v1/embeddings",
+            file=sys.stderr,
+        )
+
     print(
-        f"[simulator] gateway={args.gateway_url} path={args.path} stream={args.stream} "
+        f"[simulator] gateway={args.gateway_url} path={args.path} stream={streaming} "
         f"interval={args.interval}s teams={teams}"
     )
 
@@ -192,7 +213,7 @@ def main() -> None:
             index += 1
             try:
                 status, elapsed, ttft = send_request(
-                    args.gateway_url, args.path, team, args.model, args.stream
+                    args.gateway_url, args.path, team, args.model, streaming
                 )
                 line = (
                     f"[simulator] team={team} status={status} "
