@@ -87,6 +87,7 @@ func main() {
 	mux.Handle("/health", health)
 	mux.Handle("/v1/completions", completions)
 	mux.Handle("/v1/chat/completions", completions)
+	mux.Handle("/v1/embeddings", completions)
 	mux.Handle("/v1/metrics", metricsHandler)
 	if cfg.Gateway.EnableDebugEmit {
 		mux.Handle("/debug/emit-request-metrics", &proxy.DebugEmitHandler{Emitter: metricsEmitter})

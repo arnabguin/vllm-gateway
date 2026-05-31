@@ -30,6 +30,17 @@ func TestParseChatResponse(t *testing.T) {
 	}
 }
 
+func TestParseEmbeddingResponse(t *testing.T) {
+	body := []byte(`{"model":"mock-model","usage":{"prompt_tokens":20,"total_tokens":20}}`)
+	er, err := ParseEmbeddingResponse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if er.Model != "mock-model" || er.Usage.PromptTokens != 20 {
+		t.Fatalf("got model=%q prompt=%d", er.Model, er.Usage.PromptTokens)
+	}
+}
+
 func TestParseUsageFromResponse(t *testing.T) {
 	body := []byte(`{"model":"m","usage":{"prompt_tokens":10,"completion_tokens":5}}`)
 	paths := []string{"/v1/chat/completions", "/v1/completions"}
@@ -42,4 +53,12 @@ func TestParseUsageFromResponse(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("/v1/embeddings", func(t *testing.T) {
+		embBody := []byte(`{"model":"mock-model","usage":{"prompt_tokens":20,"total_tokens":20}}`)
+		model, p, c, err := ParseUsageFromResponse("/v1/embeddings", embBody)
+		if err != nil || model != "mock-model" || p != 20 || c != 0 {
+			t.Fatalf("model=%q p=%d c=%d err=%v", model, p, c, err)
+		}
+	})
 }

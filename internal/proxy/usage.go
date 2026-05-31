@@ -20,6 +20,11 @@ type ChatResponse struct {
 	Usage ApiUsage `json:"usage"`
 }
 
+type EmbeddingResponse struct {
+	Model string   `json:"model"`
+	Usage ApiUsage `json:"usage"`
+}
+
 func ParseCompletionResponse(body []byte) (CompletionResponse, error) {
 	cr := CompletionResponse{}
 
@@ -31,6 +36,15 @@ func ParseCompletionResponse(body []byte) (CompletionResponse, error) {
 
 func ParseChatResponse(body []byte) (ChatResponse, error) {
 	cr := ChatResponse{}
+
+	if err := json.Unmarshal(body, &cr); err != nil {
+		return cr, err
+	}
+	return cr, nil
+}
+
+func ParseEmbeddingResponse(body []byte) (EmbeddingResponse, error) {
+	cr := EmbeddingResponse{}
 
 	if err := json.Unmarshal(body, &cr); err != nil {
 		return cr, err
@@ -52,6 +66,13 @@ func ParseUsageFromResponse(path string, body []byte) (model string, promptTok, 
 			return "", 0, 0, fmt.Errorf("parse completion: %w", err)
 		}
 		return cr.Model, uint32(cr.Usage.PromptTokens), uint32(cr.Usage.CompletionTokens), nil
+	case "/v1/embeddings":
+		er, err := ParseEmbeddingResponse(body)
+		if err != nil {
+			return "", 0, 0, fmt.Errorf("parse embedding: %w", err)
+		}
+		return er.Model, uint32(er.Usage.PromptTokens), uint32(0), nil
+
 	default:
 		return "", 0, 0, fmt.Errorf("unknown path %s", path)
 	}

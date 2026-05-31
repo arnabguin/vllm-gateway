@@ -54,7 +54,9 @@ func NewProxyHandler(vllmBaseURL string, client *http.Client, store storage.Stor
 }
 
 func isProxyPath(path string) bool {
-	return path == "/v1/completions" || path == "/v1/chat/completions"
+	return path == "/v1/completions" ||
+		path == "/v1/chat/completions" ||
+		path == "/v1/embeddings"
 }
 
 type streamRequest struct {
@@ -122,7 +124,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	if isStream {
+	if isStream && r.URL.Path != "/v1/embeddings" {
 		h.proxyStreaming(w, r, reqCtx, upstreamURL, requestBody)
 		return
 	}
