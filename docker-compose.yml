@@ -76,12 +76,14 @@ services:
       - ./scripts/load_simulator.py:/app/load_simulator.py:ro
     environment:
       GATEWAY_URL: "http://gateway:8080"
+      PYTHONUNBUFFERED: "1"
       SIM_TEAM_PREFIX: "sim-team"
       SIM_MODEL: "mock-model"
       SIM_INTERVAL: "2"
       SIM_TEAMS: "5"
+      SIM_PATH: "${SIM_PATH:-/v1/completions}"
       SIM_STREAM: "${SIM_STREAM:-0}"
-    command: ["python", "/app/load_simulator.py"]
+    command: ["python", "-u", "/app/load_simulator.py"]
     depends_on:
       gateway:
         condition: service_healthy
