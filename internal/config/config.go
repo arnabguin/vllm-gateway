@@ -2,8 +2,9 @@ package config
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
+
+	"gopkg.in/yaml.v3"
 )
 
 type GatewayConfig struct {
@@ -13,6 +14,7 @@ type GatewayConfig struct {
 
 type VLLMConfig struct {
 	URL                   string `yaml:"url"`
+	EmbeddingsURL         string `yaml:"embeddings_url"`
 	MetricsScrapeInterval string `yaml:"metrics_scrape_interval"`
 }
 
@@ -54,6 +56,36 @@ func Default() Config {
 	}
 }
 
+func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("GATEWAY_LISTEN_ADDR"); v != "" {
+		cfg.Gateway.ListenAddr = v
+	}
+	if v := os.Getenv("VLLM_URL"); v != "" {
+		cfg.VLLM.URL = v
+	}
+	if v, ok := os.LookupEnv("VLLM_EMBEDDINGS_URL"); ok {
+		cfg.VLLM.EmbeddingsURL = v
+	}
+	if v := os.Getenv("VLLM_METRICS_SCRAPE_INTERVAL"); v != "" {
+		cfg.VLLM.MetricsScrapeInterval = v
+	}
+	if v := os.Getenv("CLICKHOUSE_ADDR"); v != "" {
+		cfg.Clickhouse.Addr = v
+	}
+	if v := os.Getenv("CLICKHOUSE_DATABASE"); v != "" {
+		cfg.Clickhouse.Database = v
+	}
+	if v := os.Getenv("CLICKHOUSE_USERNAME"); v != "" {
+		cfg.Clickhouse.Username = v
+	}
+	if v := os.Getenv("CLICKHOUSE_PASSWORD"); v != "" {
+		cfg.Clickhouse.Password = v
+	}
+	if v := os.Getenv("METRICS_EMIT_INTERVAL"); v != "" {
+		cfg.Metrics.EmitInterval = v
+	}
+}
+
 func Load(path string) (*Config, error) {
 	cfg := Default()
 	data, err := os.ReadFile(path)
@@ -63,6 +95,6 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
+	applyEnvOverrides(&cfg)
 	return &cfg, nil
-
 }

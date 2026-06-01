@@ -1,7 +1,10 @@
+# Single config for local dev. Docker Compose overrides hostnames via env:
+#   VLLM_URL, VLLM_EMBEDDINGS_URL, CLICKHOUSE_ADDR (see docker-compose.yml)
 gateway:
   listen_addr: ":8080"
 vllm:
   url: "http://127.0.0.1:8000"
+  embeddings_url: "http://127.0.0.1:8001"
   metrics_scrape_interval: "15s"
 clickhouse:
   addr: "127.0.0.1:9000"
