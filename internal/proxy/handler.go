@@ -38,19 +38,33 @@ func NewMetricsHandler() *MetricsHandler {
 
 // Proxy Handler
 type ProxyHandler struct {
-	VLLMBaseURL string
-	HTTPClient  *http.Client
-	Storage     storage.Storage
-	Metrics     *metrics.GatewayMetrics
+	VLLMBaseURL           string
+	EmbeddingsVLLMBaseURL string
+	HTTPClient            *http.Client
+	Storage               storage.Storage
+	Metrics               *metrics.GatewayMetrics
 }
 
 func NewProxyHandler(vllmBaseURL string, client *http.Client, store storage.Storage, m *metrics.GatewayMetrics) *ProxyHandler {
+	return NewProxyHandlerWithRouting(vllmBaseURL, "", client, store, m)
+}
+
+func NewProxyHandlerWithRouting(vllmBaseURL, embeddingsVLLMBaseURL string, client *http.Client, store storage.Storage, m *metrics.GatewayMetrics) *ProxyHandler {
 	return &ProxyHandler{
-		VLLMBaseURL: vllmBaseURL,
-		HTTPClient:  client,
-		Storage:     store,
-		Metrics:     m,
+		VLLMBaseURL:           vllmBaseURL,
+		EmbeddingsVLLMBaseURL: embeddingsVLLMBaseURL,
+		HTTPClient:            client,
+		Storage:               store,
+		Metrics:               m,
 	}
+}
+
+func (h *ProxyHandler) vllmBaseForPath(path string) string {
+	base := h.VLLMBaseURL
+	if path == "/v1/embeddings" && h.EmbeddingsVLLMBaseURL != "" {
+		base = h.EmbeddingsVLLMBaseURL
+	}
+	return strings.TrimRight(base, "/")
 }
 
 func isProxyPath(path string) bool {
@@ -116,7 +130,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	base := strings.TrimRight(h.VLLMBaseURL, "/")
+	base := h.vllmBaseForPath(r.URL.Path)
 	upstreamURL := base + r.URL.Path
 
 	requestBody, isStream, err := readRequestBodyAndCheckStream(r)
@@ -125,6 +139,11 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isStream && r.URL.Path != "/v1/embeddings" {
+		if patched, err := injectStreamIncludeUsage(requestBody); err != nil {
+			log.Printf("inject stream_options: %v", err)
+		} else {
+			requestBody = patched
+		}
 		h.proxyStreaming(w, r, reqCtx, upstreamURL, requestBody)
 		return
 	}
