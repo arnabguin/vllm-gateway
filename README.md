@@ -45,10 +45,15 @@ Clients (curl, apps, load simulator)
 | System | `vllm_system_metrics` (queue, running) | 15s |
 | Live | Prometheus histograms and gauges | 5s scrape |
 
-## Quick start (Docker)
+## Quick start
+
+One script, one config file (`config.yaml`). Docker overrides hostnames via env vars — no separate docker configs.
 
 ```bash
-docker compose up -d --build
+cp .env.example .env    # optional: HF_TOKEN + model names for Metal
+./scripts/dev.sh mock   # mock vLLM, no GPU
+# or
+./scripts/dev.sh metal  # real vLLM on Apple Silicon + same stack
 ```
 
 | Service | URL |
@@ -63,10 +68,10 @@ curl -s -X POST http://127.0.0.1:8080/v1/completions \
   -H "X-Team-ID: engineering" \
   -d '{"model":"mock-model","prompt":"hi","max_tokens":10}'
 
-python3 scripts/load_simulator.py --stream --interval 2 --teams 5
+./scripts/dev.sh stop
 ```
 
-Stop: `docker compose down`
+Optional load sidecar: `docker compose --profile simulator up -d simulator`
 
 ## Prerequisites
 
@@ -83,9 +88,10 @@ internal/proxy/       # HTTP proxy + health
 internal/scraper/     # Prometheus scrape
 internal/storage/     # ClickHouse + noop
 monitoring/           # Prometheus + Grafana dashboards
-scripts/mock_vllm.py       # dev mock (no GPU)
-scripts/load_simulator.py  # steady-rate traffic for dashboards
-config.yaml
+scripts/dev.sh               # mock or Metal: one command starts everything
+scripts/mock_vllm.py         # dev mock (no GPU)
+scripts/load_simulator.py    # steady-rate traffic for dashboards
+config.yaml                  # single config; Docker overrides via env
 ```
 
 ## Local development (macOS / Apple Silicon)
@@ -151,7 +157,7 @@ curl -s -X POST http://127.0.0.1:8080/v1/embeddings \
 
 ### 5. Streaming and TTFT (optional)
 
-Streaming records **`ttft_ms`** on the first content token (role-only chat deltas do not count). Non-streaming requests keep `ttft_ms = 0`.
+Streaming records **`ttft_ms`** on the first content token (role-only chat deltas do not count). Non-streaming requests keep `ttft_ms = 0`. The gateway injects **`stream_options.include_usage`** on streaming completion/chat requests so vLLM returns token counts in the final SSE chunk (without it, `prompt_tokens` / `completion_tokens` stay 0 in ClickHouse).
 
 ```bash
 curl -N -s -X POST http://127.0.0.1:8080/v1/completions \
@@ -187,24 +193,25 @@ Mock metrics: `running_requests=2`, `queue_depth=5`.
 
 ## Configuration
 
-Sample configs:
+One file: **`config.yaml`**. Values target localhost (`127.0.0.1`) for running the gateway binary directly on your machine.
 
-| File | Use |
-|------|-----|
-| `config.yaml` | Local dev (host ClickHouse + mock vLLM) |
-| `config.docker.yaml` | Docker Compose service DNS |
-| `config.example.yaml` | Template; copy and customize for other environments |
+When the gateway runs **inside Docker**, Compose sets env overrides so it reaches the right upstreams:
 
-**Why two configs?** The gateway always reads the same keys; only the hostnames change. On your machine, vLLM and ClickHouse are `127.0.0.1`. Inside a Compose container, `127.0.0.1` is the gateway itself, so you must use service names (`mock-vllm`, `clickhouse`). Compose mounts `config.docker.yaml` over `/config.yaml` in the gateway container.
+| Env var | Mock stack | Metal stack |
+|---------|------------|-------------|
+| `VLLM_URL` | `http://mock-vllm:8000` | `http://host.docker.internal:8000` |
+| `VLLM_EMBEDDINGS_URL` | *(empty — uses chat URL)* | `http://host.docker.internal:8001` |
+| `CLICKHOUSE_ADDR` | `clickhouse:9000` | `clickhouse:9000` |
 
-`config.yaml` (or `--config=path`):
+`./scripts/dev.sh mock` and `./scripts/dev.sh metal` set these automatically. Integration tests still use `config.integration.yaml` via `docker-compose.integration.yml`.
 
 > **Dev credentials:** Compose and sample configs use `devpassword` (ClickHouse) and Grafana `admin` / `admin`. These are for local development only — change them before any shared or production deployment.
 
 | Key | Purpose |
 |-----|---------|
 | `gateway.listen_addr` | Gateway bind address (`:8080`) |
-| `vllm.url` | vLLM OpenAI base URL |
+| `vllm.url` | vLLM OpenAI base URL (completions/chat) |
+| `vllm.embeddings_url` | Separate embedding upstream (optional; falls back to `url`) |
 | `vllm.metrics_scrape_interval` | Scrape period (`15s`) |
 | `clickhouse.addr` | Native protocol host:port (`9000`) |
 | `clickhouse.database` | Database name |
@@ -215,15 +222,25 @@ If ClickHouse is unreachable at startup, the gateway logs a warning and uses **n
 
 ## Docker
 
-### Docker Compose (full stack)
+`./scripts/dev.sh` is the recommended path. Under the hood:
 
-Runs ClickHouse, mock vLLM, and the gateway on one network:
+| Command | What runs |
+|---------|-----------|
+| `./scripts/dev.sh mock` | clickhouse, gateway, prometheus, grafana, mock-vllm, simulator |
+| `./scripts/dev.sh metal` | Host vLLM on :8000/:8001, then same Docker stack + simulator |
+| `./scripts/dev.sh stop` | Stops Docker and host vLLM |
+| `./scripts/dev.sh status` | Port / compose status |
+| `./scripts/dev.sh chat` / `embed` | Foreground Metal server (advanced) |
+
+Optional profile **`simulator`**: started automatically by `./scripts/dev.sh` (disable with `DEV_SIMULATOR=0`).
+
+### Mock stack
 
 ```bash
-docker compose up --build
+./scripts/dev.sh mock
 ```
 
-Uses `config.docker.yaml` (service DNS: `mock-vllm`, `clickhouse`). Test:
+Test:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8080/v1/completions \
@@ -232,27 +249,95 @@ curl -s -X POST http://127.0.0.1:8080/v1/completions \
   -d '{"model":"mock-model","prompt":"hi","max_tokens":10}'
 ```
 
-Stop: `docker compose down`
+### Metal stack (Apple Silicon)
+
+One-time vllm-metal install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vllm-project/vllm-metal/main/install.sh | bash
+cp .env.example .env   # add HF_TOKEN, adjust models if needed
+./scripts/dev.sh metal
+```
+
+Gateway reaches host vLLM via `host.docker.internal`. Do **not** run mock and Metal together (both want host `:8000`).
+
+**`/v1/chat/completions`** — pass `messages` (simplest for instruct models):
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Team-ID: engineering" \
+  -d '{
+    "model": "mlx-community/Qwen2.5-0.5B-Instruct-4bit",
+    "messages": [{"role": "user", "content": "Say hello in one word."}],
+    "max_tokens": 10
+  }' | python3 -m json.tool
+```
+
+**`/v1/completions`** — also works on instruct models; wrap your user text in the model's **chat template** (Qwen2 example below). A bare `"prompt": "hello"` skips the template and produces garbage — the gateway still attributes tokens correctly.
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/v1/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Team-ID: engineering" \
+  -d "$(python3 -c "
+import json
+prompt = '''<|im_start|>user
+Say hello in one word.
+<|im_start|>assistant
+'''
+print(json.dumps({
+  'model': 'mlx-community/Qwen2.5-0.5B-Instruct-4bit',
+  'prompt': prompt,
+  'max_tokens': 10,
+}))
+")" | python3 -m json.tool
+```
+
+Load simulator with `/v1/completions` on Metal: add `--instruct` (or `SIM_INSTRUCT=1`) to apply the Qwen2 wrapper automatically.
+
+Embeddings:
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -H "X-Team-ID: engineering" \
+  -d '{"model":"mlx-community/Qwen3-Embedding-0.6B-8bit","input":"gpu cost"}'
+```
+
+Stop: `./scripts/dev.sh stop`
 
 ### Load simulator (optional sidecar)
 
-`scripts/load_simulator.py` sends `POST /v1/completions`, `/v1/chat/completions`, or `/v1/embeddings` on a fixed interval, rotating across teams (`sim-team-1`, `sim-team-2`, …). Use `--stream` / `SIM_STREAM=1` for SSE (`stream: true`) on completion paths to populate TTFT metrics in Grafana (ignored for embeddings).
+`scripts/load_simulator.py` sends `POST /v1/completions`, `/v1/chat/completions`, or `/v1/embeddings` on a fixed interval. By default it rotates across **teams** (`sim-team-1`, `sim-team-2`, …) on a single path. Use **`--rotate-paths`** to cycle all three routes each request. Use **`--stream-fraction`** / `SIM_STREAM_FRACTION` (0–1) so a random subset of completion/chat requests use `stream: true` (TTFT on Grafana); `--stream` / `SIM_STREAM=1` forces 100%. Embeddings never stream. `./scripts/dev.sh` sets **`SIM_STREAM_FRACTION=0.33`** on the simulator by default.
 
-**Docker** (with the stack already up):
+**Docker** (with the stack already up via `./scripts/dev.sh mock` or `metal`):
 
 ```bash
-docker compose up -d --build
 docker compose --profile simulator up -d simulator
 docker compose logs -f simulator
 ```
 
-Defaults: **2s** interval, **5** teams, **`/v1/completions`** (`SIM_INTERVAL` / `SIM_TEAMS` / `SIM_PATH` in `docker-compose.yml`). Override or run locally:
+Defaults: **2s** interval, **5** teams, **`/v1/completions`** (`SIM_INTERVAL` / `SIM_TEAMS` / `SIM_PATH` in `docker-compose.yml`). On **Metal**, use chat completions for instruct models:
+
+```bash
+SIM_MODEL=mlx-community/Qwen2.5-0.5B-Instruct-4bit \
+SIM_PATH=/v1/chat/completions \
+  docker compose --profile simulator up -d simulator
+```
+
+Override or run locally:
 
 ```bash
 python3 scripts/load_simulator.py --interval 2 --teams 5
 python3 scripts/load_simulator.py -i 1 -n 3 --once   # one request per team, then exit
+python3 scripts/load_simulator.py --path /v1/completions --instruct \
+  --model mlx-community/Qwen2.5-0.5B-Instruct-4bit -i 2 -n 5
 python3 scripts/load_simulator.py --stream --path /v1/chat/completions -i 2 -n 5
+python3 scripts/load_simulator.py --stream-fraction 0.33 --rotate-paths -i 2 -n 5
 python3 scripts/load_simulator.py --path /v1/embeddings -i 2 -n 5
+python3 scripts/load_simulator.py --rotate-paths --instruct \
+  --model mlx-community/Qwen2.5-0.5B-Instruct-4bit -i 2 -n 5
 ```
 
 | Flag | Meaning |
@@ -260,15 +345,18 @@ python3 scripts/load_simulator.py --path /v1/embeddings -i 2 -n 5
 | `-i` / `--interval` | Seconds between requests |
 | `-n` / `--teams` | Number of teams (`sim-team-1` … `sim-team-N`) |
 | `--gateway-url` | Base URL (default `http://127.0.0.1:8080`, or `GATEWAY_URL` in Docker) |
-| `--path` | `/v1/completions`, `/v1/chat/completions`, or `/v1/embeddings` (or `SIM_PATH`) |
-| `--stream` | `stream: true` + drain SSE; logs client-side `ttft=` (or `SIM_STREAM=1`; not used for embeddings) |
+| `--path` | Single path (default `/v1/completions`; ignored with `--rotate-paths`) |
+| `--rotate-paths` | Cycle completions → chat → embeddings each request (`SIM_ROTATE_PATHS=1`) |
+| `--instruct` | Wrap `/v1/completions` prompts in Qwen2 chat template (`SIM_INSTRUCT=1`) |
+| `--stream` | All completion/chat requests stream (`SIM_STREAM=1`; embeddings excluded) |
+| `--stream-fraction` | Per-request probability of `stream: true` on completion paths (`SIM_STREAM_FRACTION`, 0–1) |
 | `--once` | One request per team, then exit |
 
 Stop simulator only: `docker compose --profile simulator stop simulator`
 
 ### Grafana dashboards
 
-With the full stack running (`docker compose up --build`), open **http://127.0.0.1:3000** (login `admin` / `admin`).
+With the core stack running (`docker compose up -d --build`, plus `--profile mock` or Metal on the host), open **http://127.0.0.1:3000** (login `admin` / `admin`).
 
 Provisioned datasources:
 
