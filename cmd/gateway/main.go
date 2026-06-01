@@ -26,6 +26,9 @@ func main() {
 		cfg.VLLM.URL,
 		cfg.Clickhouse.Database,
 	)
+	if cfg.VLLM.EmbeddingsURL != "" {
+		log.Printf("vllm embeddings upstream: %s", cfg.VLLM.EmbeddingsURL)
+	}
 
 	var store storage.Storage
 	ch, err := storage.NewClickHouseStorage(cfg.Clickhouse)
@@ -80,7 +83,7 @@ func main() {
 		VLLMBaseURL: cfg.VLLM.URL,
 		HTTPClient:  httpClient,
 	}
-	completions := proxy.NewProxyHandler(cfg.VLLM.URL, httpClient, store, gwMetrics)
+	completions := proxy.NewProxyHandlerWithRouting(cfg.VLLM.URL, cfg.VLLM.EmbeddingsURL, httpClient, store, gwMetrics)
 	metricsHandler := proxy.NewMetricsHandler()
 
 	mux := http.NewServeMux()
