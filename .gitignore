@@ -11,10 +11,11 @@
 coverage.out
 coverage.html
 
-# Local overrides (keep config.yaml in repo for dev; override locally if needed)
+# Local overrides
 .env
 .env.*
 !.env.example
+.dev/
 config.local.yaml
 config.*.local.yaml
 
