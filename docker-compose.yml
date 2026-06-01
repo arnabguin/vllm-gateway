@@ -1,3 +1,12 @@
+# Use ./scripts/dev.sh — one entry point for mock or Metal dev flows.
+#
+#   ./scripts/dev.sh mock    # mock vLLM + full stack
+#   ./scripts/dev.sh metal   # host Metal vLLM + full stack
+#   ./scripts/dev.sh stop
+#
+# Optional load sidecar:
+#   docker compose --profile simulator up -d simulator
+
 services:
   clickhouse:
     image: clickhouse/clickhouse-server:latest
@@ -16,6 +25,7 @@ services:
       start_period: 10s
 
   mock-vllm:
+    profiles: ["mock"]
     image: python:3.12-alpine
     container_name: mock-vllm
     working_dir: /app
@@ -39,14 +49,21 @@ services:
     container_name: vllm-gateway
     ports:
       - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      VLLM_URL: ${VLLM_URL:-http://host.docker.internal:8000}
+      VLLM_EMBEDDINGS_URL: ${VLLM_EMBEDDINGS_URL:-http://host.docker.internal:8001}
+      CLICKHOUSE_ADDR: ${CLICKHOUSE_ADDR:-clickhouse:9000}
     volumes:
-      - ./config.docker.yaml:/config.yaml:ro
+      - ./config.yaml:/config.yaml:ro
     command: ["/gateway", "--config=/config.yaml"]
     depends_on:
       clickhouse:
         condition: service_healthy
       mock-vllm:
         condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health"]
       interval: 2s
@@ -59,12 +76,13 @@ services:
     container_name: vllm-gateway-prometheus
     ports:
       - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     depends_on:
       - gateway
-      - mock-vllm
       - clickhouse
 
   simulator:
@@ -78,11 +96,14 @@ services:
       GATEWAY_URL: "http://gateway:8080"
       PYTHONUNBUFFERED: "1"
       SIM_TEAM_PREFIX: "sim-team"
-      SIM_MODEL: "mock-model"
+      SIM_MODEL: "${SIM_MODEL:-mock-model}"
       SIM_INTERVAL: "2"
       SIM_TEAMS: "5"
       SIM_PATH: "${SIM_PATH:-/v1/completions}"
+      SIM_ROTATE_PATHS: "${SIM_ROTATE_PATHS:-0}"
       SIM_STREAM: "${SIM_STREAM:-0}"
+      SIM_STREAM_FRACTION: "${SIM_STREAM_FRACTION:-0}"
+      SIM_EMBEDDING_MODEL: "${SIM_EMBEDDING_MODEL:-mlx-community/Qwen3-Embedding-0.6B-8bit}"
     command: ["python", "-u", "/app/load_simulator.py"]
     depends_on:
       gateway:
