@@ -10,9 +10,19 @@ scrape_configs:
       - targets:
           - "gateway:8080"
 
+  # Active when mock profile is up (docker compose --profile mock).
   - job_name: "mock-vllm"
     metrics_path: "/metrics"
     scheme: "http"
     static_configs:
       - targets:
           - "mock-vllm:8000"
+
+  # vLLM Metal on the Mac host (chat + embeddings servers).
+  - job_name: "vllm-metal"
+    metrics_path: "/metrics"
+    scheme: "http"
+    static_configs:
+      - targets:
+          - "host.docker.internal:8000"
+          - "host.docker.internal:8001"
