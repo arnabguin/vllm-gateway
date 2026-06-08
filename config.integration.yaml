@@ -12,3 +12,5 @@ clickhouse:
 metrics:
   # Periodic emit off in e2e; tests flush via POST /debug/emit-request-metrics.
   emit_interval: "0"
+cost:
+  gpu_usd_per_hour: 2.50

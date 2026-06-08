@@ -13,7 +13,5 @@ clickhouse:
   password: "devpassword"
 metrics:
   emit_interval: "15s"
-pricing:
-  llama-3-8b:
-    prompt: 0.0001
-    completion: 0.0002
+cost:
+  gpu_usd_per_hour: 2.50

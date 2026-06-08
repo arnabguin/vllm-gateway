@@ -62,3 +62,58 @@ func TestLoadClearsEmbeddingsURL(t *testing.T) {
 		t.Fatalf("EmbeddingsURL = %q, want empty", cfg.VLLM.EmbeddingsURL)
 	}
 }
+
+func TestLoadCostFromYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(`cost:
+  gpu_usd_per_hour: 2.50
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Cost.GPUUSDPerHour != 2.50 {
+		t.Fatalf("Cost.GPUUSDPerHour = %v, want 2.50", cfg.Cost.GPUUSDPerHour)
+	}
+}
+
+func TestLoadGPUUSDPerHourEnvOverride(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(`cost:
+  gpu_usd_per_hour: 1.00
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GPU_USD_PER_HOUR", "3.75")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Cost.GPUUSDPerHour != 3.75 {
+		t.Fatalf("Cost.GPUUSDPerHour = %v, want 3.75 (env override)", cfg.Cost.GPUUSDPerHour)
+	}
+}
+
+func TestLoadGPUUSDPerHourEnvInvalid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(`cost:
+  gpu_usd_per_hour: 2.50
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GPU_USD_PER_HOUR", "not-a-number")
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load: want error for invalid GPU_USD_PER_HOUR")
+	}
+}

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -29,9 +30,8 @@ type MetricsConfig struct {
 	EmitInterval string `yaml:"emit_interval"`
 }
 
-type ModelPricing struct {
-	Prompt     float64 `yaml:"prompt"`
-	Completion float64 `yaml:"completion"`
+type CostConfig struct {
+	GPUUSDPerHour     float64 `yaml:"gpu_usd_per_hour"`
 }
 
 type Config struct {
@@ -39,7 +39,7 @@ type Config struct {
 	VLLM       VLLMConfig              `yaml:"vllm"`
 	Clickhouse ClickHouseConfig        `yaml:"clickhouse"`
 	Metrics    MetricsConfig           `yaml:"metrics"`
-	Pricing    map[string]ModelPricing `yaml:"pricing"`
+	Cost       CostConfig              `yaml:"cost"`
 }
 
 func Default() Config {
@@ -56,7 +56,7 @@ func Default() Config {
 	}
 }
 
-func applyEnvOverrides(cfg *Config) {
+func applyEnvOverrides(cfg *Config) error {
 	if v := os.Getenv("GATEWAY_LISTEN_ADDR"); v != "" {
 		cfg.Gateway.ListenAddr = v
 	}
@@ -84,6 +84,14 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("METRICS_EMIT_INTERVAL"); v != "" {
 		cfg.Metrics.EmitInterval = v
 	}
+	if v := os.Getenv("GPU_USD_PER_HOUR"); v != "" {
+		rate, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return fmt.Errorf("GPU_USD_PER_HOUR: %w", err)
+		}
+		cfg.Cost.GPUUSDPerHour = rate
+	}
+	return nil
 }
 
 func Load(path string) (*Config, error) {
@@ -95,6 +103,9 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
-	applyEnvOverrides(&cfg)
+	if err := applyEnvOverrides(&cfg); err != nil {
+		return nil, fmt.Errorf("apply env overrides: %w", err)
+	}
+	
 	return &cfg, nil
 }
