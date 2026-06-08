@@ -12,6 +12,7 @@ import (
 	"github.com/arnab-guin/vllm-gateway/internal/proxy"
 	"github.com/arnab-guin/vllm-gateway/internal/scraper"
 	"github.com/arnab-guin/vllm-gateway/internal/storage"
+	"github.com/arnab-guin/vllm-gateway/internal/cost"
 )
 
 func main() {
@@ -83,8 +84,15 @@ func main() {
 		VLLMBaseURL: cfg.VLLM.URL,
 		HTTPClient:  httpClient,
 	}
-	completions := proxy.NewProxyHandlerWithRouting(cfg.VLLM.URL, cfg.VLLM.EmbeddingsURL, httpClient, store, gwMetrics)
-	metricsHandler := proxy.NewMetricsHandler()
+	tokenThroughput := cost.NewTokenThroughput()
+	calc := cost.NewCalculator(cfg.Cost.GPUUSDPerHour, tokenThroughput)
+	completions := proxy.NewProxyHandlerWithRouting(
+		cfg.VLLM.URL, cfg.VLLM.EmbeddingsURL,
+		httpClient, store, gwMetrics,
+		calc,
+		tokenThroughput,
+	)
+	metricsHandler := proxy.NewMetricsHandler(calc, tokenThroughput)
 
 	mux := http.NewServeMux()
 	mux.Handle("/health", health)

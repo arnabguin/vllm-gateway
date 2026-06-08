@@ -10,14 +10,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arnab-guin/vllm-gateway/internal/cost"
 	"github.com/arnab-guin/vllm-gateway/internal/metrics"
 	"github.com/arnab-guin/vllm-gateway/internal/storage"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Metrics handler
+// MetricsHandler serves Prometheus metrics and refreshes cost gauges at scrape time.
 type MetricsHandler struct {
+	Calc       *cost.Calculator
+	Throughput *cost.TokenThroughput
+	costGauges *metrics.CostGaugeRefresher
 }
 
 func isMetricsPath(path string) bool {
@@ -29,11 +33,23 @@ func (h *MetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	h.refreshCostMetrics()
 	promhttp.Handler().ServeHTTP(w, r)
 }
 
-func NewMetricsHandler() *MetricsHandler {
-	return &MetricsHandler{}
+func (h *MetricsHandler) refreshCostMetrics() {
+	if h.costGauges == nil {
+		h.costGauges = metrics.NewCostGaugeRefresher()
+	}
+	h.costGauges.Refresh(h.Calc, h.Throughput)
+}
+
+func NewMetricsHandler(c *cost.Calculator, t *cost.TokenThroughput) *MetricsHandler {
+	return &MetricsHandler{
+		Calc:       c,
+		Throughput: t,
+		costGauges: metrics.NewCostGaugeRefresher(),
+	}
 }
 
 // Proxy Handler
@@ -43,19 +59,23 @@ type ProxyHandler struct {
 	HTTPClient            *http.Client
 	Storage               storage.Storage
 	Metrics               *metrics.GatewayMetrics
+	Cost                  *cost.Calculator
+	Throughput            *cost.TokenThroughput
 }
 
-func NewProxyHandler(vllmBaseURL string, client *http.Client, store storage.Storage, m *metrics.GatewayMetrics) *ProxyHandler {
-	return NewProxyHandlerWithRouting(vllmBaseURL, "", client, store, m)
+func NewProxyHandler(vllmBaseURL string, client *http.Client, store storage.Storage, m *metrics.GatewayMetrics, c *cost.Calculator, t *cost.TokenThroughput) *ProxyHandler {
+	return NewProxyHandlerWithRouting(vllmBaseURL, "", client, store, m, c, t)
 }
 
-func NewProxyHandlerWithRouting(vllmBaseURL, embeddingsVLLMBaseURL string, client *http.Client, store storage.Storage, m *metrics.GatewayMetrics) *ProxyHandler {
+func NewProxyHandlerWithRouting(vllmBaseURL, embeddingsVLLMBaseURL string, client *http.Client, store storage.Storage, m *metrics.GatewayMetrics, c *cost.Calculator, t *cost.TokenThroughput) *ProxyHandler {
 	return &ProxyHandler{
 		VLLMBaseURL:           vllmBaseURL,
 		EmbeddingsVLLMBaseURL: embeddingsVLLMBaseURL,
 		HTTPClient:            client,
 		Storage:               store,
 		Metrics:               m,
+		Cost:                  c,
+		Throughput:            t,
 	}
 }
 
@@ -200,33 +220,7 @@ func (h *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	latencyMS := uint32(time.Since(reqCtx.StartTime).Milliseconds())
-	ttftMS := uint32(0) // populated when streaming TTFT is measured
-
-	if h.Metrics != nil {
-		if h.Metrics.Latency != nil {
-			h.Metrics.Latency.Record(reqCtx.TeamID, latencyMS)
-		}
-		if h.Metrics.TTFT != nil && ttftMS > 0 {
-			h.Metrics.TTFT.Record(reqCtx.TeamID, ttftMS)
-		}
-	}
-
-	event := storage.RequestEvent{
-		Timestamp:        time.Now(),
-		TeamID:           reqCtx.TeamID,
-		Project:          reqCtx.Project,
-		UserID:           reqCtx.UserID,
-		Model:            model,
-		PromptTokens:     promptTok,
-		CompletionTokens: completionTok,
-		LatencyMS:        latencyMS,
-		TTFTMS:           ttftMS,
-		StatusCode:       uint16(outResp.StatusCode),
-	}
-	if err := h.Storage.InsertRequestEvent(r.Context(), event); err != nil {
-		log.Printf("insert request event: %v", err)
-	}
+	h.recordRequestMetricsAndEvent(r.Context(), reqCtx, model, promptTok, completionTok, 0, outResp.StatusCode)
 	w.WriteHeader(outResp.StatusCode)
 	_, _ = w.Write(body)
 }

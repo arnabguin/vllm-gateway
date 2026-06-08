@@ -135,6 +135,18 @@ func copyHeaders(dst, src http.Header) {
 	}
 }
 
+func (h *ProxyHandler) recordUsage(reqCtx RequestContext, promptTok, completionTok uint32, statusCode int) {
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		return
+	}
+	if promptTok+completionTok == 0 {
+		return
+	}
+	if h.Throughput != nil {
+		h.Throughput.RecordRequest(reqCtx.TeamID, promptTok, completionTok)
+	}
+}
+
 func (h *ProxyHandler) recordRequestMetricsAndEvent(
 	ctx context.Context,
 	reqCtx RequestContext,
@@ -142,6 +154,8 @@ func (h *ProxyHandler) recordRequestMetricsAndEvent(
 	promptTok, completionTok, ttftMS uint32,
 	statusCode int,
 ) {
+	h.recordUsage(reqCtx, promptTok, completionTok, statusCode)
+
 	latencyMS := uint32(time.Since(reqCtx.StartTime).Milliseconds())
 
 	if h.Metrics != nil {
