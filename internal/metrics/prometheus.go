@@ -38,3 +38,53 @@ var GatewayRequestTTFT = promauto.NewHistogramVec(
 	},
 	[]string{"team_id"},
 )
+
+// Rolling 10-minute token window (updated at Prometheus scrape time, not per request).
+var GatewayTeamTokens10m = promauto.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "gateway_team_tokens_10m",
+		Help: "Prompt plus completion tokens per team in the rolling 10-minute window",
+	},
+	[]string{"team_id"},
+)
+
+var GatewayTeamPromptTokens10m = promauto.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "gateway_team_prompt_tokens_10m",
+		Help: "Prompt tokens per team in the rolling 10-minute window",
+	},
+	[]string{"team_id"},
+)
+
+var GatewayTeamCompletionTokens10m = promauto.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "gateway_team_completion_tokens_10m",
+		Help: "Completion tokens per team in the rolling 10-minute window",
+	},
+	[]string{"team_id"},
+)
+
+// Team-attributed cost derived from cluster USD/token and team token usage.
+var GatewayTeamEstimatedCostUSD10m = promauto.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "gateway_team_estimated_cost_usd_10m",
+		Help: "Estimated USD attributed to the team for tokens consumed in the rolling 10-minute window",
+	},
+	[]string{"team_id"},
+)
+
+var GatewayTeamEstimatedCostUSDPerHour = promauto.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "gateway_team_estimated_cost_usd_per_hour",
+		Help: "Estimated USD per hour for the team, extrapolated from the rolling 10-minute token window",
+	},
+	[]string{"team_id"},
+)
+
+// Cluster-level effective price (same for all teams; not labeled by team_id).
+var GatewayClusterUSDPerMillionTokens = promauto.NewGauge(
+	prometheus.GaugeOpts{
+		Name: "gateway_cluster_usd_per_million_tokens",
+		Help: "Effective USD per million tokens cluster-wide, from gpu_usd_per_hour and measured cluster throughput",
+	},
+)
