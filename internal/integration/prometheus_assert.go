@@ -5,6 +5,7 @@ package integration
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"testing"
 
 	dto "github.com/prometheus/client_model/go"
@@ -195,4 +196,112 @@ func assertPrometheusExact(t *testing.T, families map[string]*dto.MetricFamily, 
 	}
 	wantHistCount := func(string) uint64 { return uint64(requestsPerTeam) }
 	assertHistogramSeriesMapExact(t, "gateway_request_latency", histograms, wantTeams, wantHistCount)
+}
+
+const e2eGPUUSDPerHour = 2.50
+
+func assertPrometheusCostGaugesExact(
+	t *testing.T,
+	families map[string]*dto.MetricFamily,
+	teams []string,
+	requestsPerTeam int,
+	promptTokensPerRequest uint32,
+	completionTokensPerRequest uint32,
+) {
+	t.Helper()
+	wantTeams := teamSet(teams)
+
+	wantPrompt := float64(promptTokensPerRequest) * float64(requestsPerTeam)
+	wantCompletion := float64(completionTokensPerRequest) * float64(requestsPerTeam)
+	wantTotal := wantPrompt + wantCompletion
+
+	clusterTotal := wantTotal * float64(len(teams))
+	clusterTokensPerHour := clusterTotal * (60.0 / 10.0)
+	usdPerToken := e2eGPUUSDPerHour / clusterTokensPerHour
+	wantUSDMillion := usdPerToken * 1_000_000
+	wantCost10m := wantTotal * usdPerToken
+	wantCostPerHour := wantTotal * (60.0 / 10.0) * usdPerToken
+
+	prompt, err := labeledGaugeSeries(families, "gateway_team_prompt_tokens_10m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSeriesMapExact(t, "gateway_team_prompt_tokens_10m", prompt, wantTeams, func(string) float64 { return wantPrompt })
+
+	completion, err := labeledGaugeSeries(families, "gateway_team_completion_tokens_10m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSeriesMapExact(t, "gateway_team_completion_tokens_10m", completion, wantTeams, func(string) float64 { return wantCompletion })
+
+	tokens, err := labeledGaugeSeries(families, "gateway_team_tokens_10m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSeriesMapExact(t, "gateway_team_tokens_10m", tokens, wantTeams, func(string) float64 { return wantTotal })
+
+	cost10m, err := labeledGaugeSeries(families, "gateway_team_estimated_cost_usd_10m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSeriesMapFloatClose(t, "gateway_team_estimated_cost_usd_10m", cost10m, wantTeams, func(string) float64 { return wantCost10m })
+
+	costPerHour, err := labeledGaugeSeries(families, "gateway_team_estimated_cost_usd_per_hour")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSeriesMapFloatClose(t, "gateway_team_estimated_cost_usd_per_hour", costPerHour, wantTeams, func(string) float64 { return wantCostPerHour })
+
+	gotUSDMillion, err := scalarGaugeValue(families, "gateway_cluster_usd_per_million_tokens")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFloatClose(t, "gateway_cluster_usd_per_million_tokens", gotUSDMillion, wantUSDMillion)
+}
+
+func scalarGaugeValue(families map[string]*dto.MetricFamily, name string) (float64, error) {
+	mf, ok := families[name]
+	if !ok || mf == nil {
+		return 0, fmt.Errorf("metric %q not found", name)
+	}
+	if mf.GetType() != dto.MetricType_GAUGE {
+		return 0, fmt.Errorf("metric %q is not a gauge", name)
+	}
+	metrics := mf.GetMetric()
+	if len(metrics) != 1 || metrics[0].GetGauge() == nil {
+		return 0, fmt.Errorf("metric %q is not a scalar gauge", name)
+	}
+	return metrics[0].GetGauge().GetValue(), nil
+}
+
+func assertFloatClose(t *testing.T, name string, got, want float64) {
+	t.Helper()
+	if math.Abs(got-want) > 1e-6 {
+		t.Fatalf("%s: got %v want %v", name, got, want)
+	}
+}
+
+func assertSeriesMapFloatClose(
+	t *testing.T,
+	metricName string,
+	got map[string]float64,
+	wantTeams map[string]struct{},
+	wantValue func(teamID string) float64,
+) {
+	t.Helper()
+	if len(got) != len(wantTeams) {
+		t.Fatalf("%s time series count: got %d want %d (series=%v)", metricName, len(got), len(wantTeams), got)
+	}
+	for team := range wantTeams {
+		v, ok := got[team]
+		if !ok {
+			t.Fatalf("%s missing time series for team %q", metricName, team)
+		}
+		assertFloatClose(t, fmt.Sprintf("%s team %q", metricName, team), v, wantValue(team))
+	}
+	for team, v := range got {
+		if _, ok := wantTeams[team]; !ok {
+			t.Fatalf("%s unexpected time series team %q value %v", metricName, team, v)
+		}
+	}
 }

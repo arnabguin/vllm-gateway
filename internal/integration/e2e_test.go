@@ -83,6 +83,7 @@ func TestGatewayE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertPrometheusExact(t, families, teams, requestsPerTeam)
+	assertPrometheusCostGaugesExact(t, families, teams, requestsPerTeam, e2eMockPromptTokens, e2eMockCompletionTokens)
 }
 
 // TestRequestMetricsEmitTiming checks request_metrics rollup via manual emit only

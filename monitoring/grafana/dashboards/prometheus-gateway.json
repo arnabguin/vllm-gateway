@@ -19,7 +19,7 @@
       "id": 100,
       "options": {
         "code": { "language": "plaintext", "showLineNumbers": false, "showMiniMap": false },
-        "content": "### Prometheus only\nMetrics are exposed on the gateway at `GET /v1/metrics` and scraped by Prometheus every **5s** (`monitoring/prometheus.yml`).\n\nIn-memory structures (counters, quantile streams) are mirrored into Prometheus on the hot path; this dashboard does **not** use ClickHouse tables or the 15s emit flush.",
+        "content": "### Prometheus only\nMetrics are exposed on the gateway at `GET /v1/metrics` and scraped by Prometheus every **5s** (`monitoring/prometheus.yml`).\n\nRequest counters, in-flight gauges, and latency histograms update on the **hot path**. **Token and cost gauges** (`gateway_team_*_10m`, `gateway_*_cost_*`) read the 10-minute ring buffer and refresh on each **metrics scrape** (not per request).\n\nThis dashboard does **not** use ClickHouse tables or the 15s emit flush.",
         "mode": "markdown"
       },
       "title": "About this dashboard",
@@ -136,18 +136,172 @@
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 },
+      "id": 15,
+      "title": "GPU cost attribution (10-minute rolling window)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "**Source:** `TokenThroughput` ring buffer → scrape-time gauge `gateway_team_tokens_10m{team_id}` (prompt + completion in rolling 10m).\n\n**Refresh:** Updated on each `GET /v1/metrics` scrape (~**5s**), not on each request. Window decays when traffic stops.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 21 },
+      "id": 7,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "gateway_team_tokens_10m",
+          "legendFormat": "{{team_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Team tokens (10m window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "**Source:** `TokenThroughput` → `gateway_team_prompt_tokens_10m{team_id}`. Scrape-time gauge from 10 × 1-minute ring slots.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 21 },
+      "id": 8,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "gateway_team_prompt_tokens_10m",
+          "legendFormat": "{{team_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Prompt tokens (10m window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "**Source:** `TokenThroughput` → `gateway_team_completion_tokens_10m{team_id}`. Scrape-time gauge from 10 × 1-minute ring slots.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 21 },
+      "id": 9,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "gateway_team_completion_tokens_10m",
+          "legendFormat": "{{team_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Completion tokens (10m window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "**Source:** `Calculator.USDPerMillionTokens()` → `gateway_cluster_usd_per_million_tokens` from `gpu_usd_per_hour` and measured cluster throughput (10m window ×6). Same rate for all teams.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "unit": "currencyUSD" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 29 },
+      "id": 11,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "gateway_cluster_usd_per_million_tokens",
+          "refId": "A"
+        }
+      ],
+      "title": "Cluster effective $ / 1M tokens",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "**Source:** team 10m tokens × cluster `usd_per_token` → `gateway_team_estimated_cost_usd_10m{team_id}`. Scrape-time gauge.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "currencyUSD" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 29 },
+      "id": 12,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "gateway_team_estimated_cost_usd_10m",
+          "legendFormat": "{{team_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Team estimated cost (10m window)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "**Source:** team tokens/hr (from 10m window) × cluster `usd_per_token` → `gateway_team_estimated_cost_usd_per_hour{team_id}`. Scrape-time gauge.",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "currencyUSD" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 29 },
+      "id": 13,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "gateway_team_estimated_cost_usd_per_hour",
+          "legendFormat": "{{team_id}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Team estimated burn rate ($/hour)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 37 },
       "id": 10,
       "title": "vLLM process metrics (Prometheus scrape of mock-vllm / vLLM)",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "**Source:** vLLM Prometheus exposition `vllm:num_requests_running` (job `mock-vllm`, not the gateway binary).\n\n**Dump / scrape interval:** Prometheus scrape every **5s**. A copy is also inserted into ClickHouse `vllm_system_metrics` every **15s** (see ClickHouse dashboard).",
+      "description": "**Source:** vLLM `/metrics` gauge `vllm:num_requests_running` (scraped by Prometheus job `mock-vllm` or `vllm-metal` — **not** the gateway).\n\n**Why zero?** On **metal** dev, real vLLM often reports **0** when requests finish faster than the 5s scrape (light simulator load). Mock mode exposes static demo values (2 running / 5 waiting). Gateway `gateway_inflight_requests` can be >0 while vLLM shows 0 — different measurement points.\n\nClickHouse copy every **15s** in `vllm_system_metrics` (see ClickHouse dashboard).",
       "fieldConfig": {
         "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 38 },
       "id": 5,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom" },
@@ -156,9 +310,15 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "vllm:num_requests_running",
-          "legendFormat": "running",
+          "expr": "sum by (model_name, instance) ({__name__=\"vllm:num_requests_running\"})",
+          "legendFormat": "{{model_name}} {{instance}}",
           "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max_over_time(sum({__name__=\"vllm:num_requests_running\"})[5m:])",
+          "legendFormat": "peak (5m)",
+          "refId": "B"
         }
       ],
       "title": "vLLM running requests",
@@ -166,12 +326,12 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "**Source:** vLLM gauge `vllm:num_requests_waiting` (queue depth).\n\n**Dump / scrape interval:** Prometheus scrape every **5s**. ClickHouse copy every **15s** in `vllm_system_metrics.queue_depth`.",
+      "description": "**Source:** vLLM `/metrics` gauge `vllm:num_requests_waiting` (queue depth). Often **0** on metal under light load; mock mode returns a static demo value.\n\nClickHouse copy every **15s** in `vllm_system_metrics.queue_depth`.",
       "fieldConfig": {
         "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 38 },
       "id": 6,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom" },
@@ -180,9 +340,15 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "vllm:num_requests_waiting",
-          "legendFormat": "waiting",
+          "expr": "sum by (model_name, instance) ({__name__=\"vllm:num_requests_waiting\"})",
+          "legendFormat": "{{model_name}} {{instance}}",
           "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "max_over_time(sum({__name__=\"vllm:num_requests_waiting\"})[5m:])",
+          "legendFormat": "peak (5m)",
+          "refId": "B"
         }
       ],
       "title": "vLLM queue depth (waiting)",
