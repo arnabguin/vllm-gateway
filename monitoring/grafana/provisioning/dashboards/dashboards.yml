@@ -6,7 +6,7 @@ providers:
     folder: vLLM Gateway
     type: file
     disableDeletion: false
-    updateIntervalSeconds: 30
-    allowUiUpdates: true
+    updateIntervalSeconds: 10
+    allowUiUpdates: false
     options:
       path: /var/lib/grafana/dashboards

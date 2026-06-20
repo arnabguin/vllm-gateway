@@ -41,7 +41,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (team_id) (rate(gateway_total_requests[1m]))",
+          "expr": "sum by (team_id) (rate(gateway_total_requests{team_id=~\"$team\"}[1m]))",
           "legendFormat": "{{team_id}}",
           "refId": "A"
         }
@@ -65,7 +65,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum by (team_id) (gateway_inflight_requests)",
+          "expr": "sum by (team_id) (gateway_inflight_requests{team_id=~\"$team\"})",
           "legendFormat": "{{team_id}}",
           "refId": "A"
         }
@@ -89,19 +89,19 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.50, sum by (le, team_id) (rate(gateway_request_latency_bucket[5m])))",
+          "expr": "histogram_quantile(0.50, sum by (le, team_id) (rate(gateway_request_latency_bucket{team_id=~\"$team\"}[5m])))",
           "legendFormat": "p50 {{team_id}}",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum by (le, team_id) (rate(gateway_request_latency_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, team_id) (rate(gateway_request_latency_bucket{team_id=~\"$team\"}[5m])))",
           "legendFormat": "p95 {{team_id}}",
           "refId": "B"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.99, sum by (le, team_id) (rate(gateway_request_latency_bucket[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le, team_id) (rate(gateway_request_latency_bucket{team_id=~\"$team\"}[5m])))",
           "legendFormat": "p99 {{team_id}}",
           "refId": "C"
         }
@@ -125,7 +125,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "histogram_quantile(0.95, sum by (le, team_id) (rate(gateway_request_ttft_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, team_id) (rate(gateway_request_ttft_bucket{team_id=~\"$team\"}[5m])))",
           "legendFormat": "p95 TTFT {{team_id}}",
           "refId": "A"
         }
@@ -156,7 +156,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "gateway_team_tokens_10m",
+          "expr": "gateway_team_tokens_10m{team_id=~\"$team\"}",
           "legendFormat": "{{team_id}}",
           "refId": "A"
         }
@@ -180,7 +180,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "gateway_team_prompt_tokens_10m",
+          "expr": "gateway_team_prompt_tokens_10m{team_id=~\"$team\"}",
           "legendFormat": "{{team_id}}",
           "refId": "A"
         }
@@ -204,7 +204,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "gateway_team_completion_tokens_10m",
+          "expr": "gateway_team_completion_tokens_10m{team_id=~\"$team\"}",
           "legendFormat": "{{team_id}}",
           "refId": "A"
         }
@@ -255,7 +255,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "gateway_team_estimated_cost_usd_10m",
+          "expr": "gateway_team_estimated_cost_usd_10m{team_id=~\"$team\"}",
           "legendFormat": "{{team_id}}",
           "refId": "A"
         }
@@ -279,7 +279,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "gateway_team_estimated_cost_usd_per_hour",
+          "expr": "gateway_team_estimated_cost_usd_per_hour{team_id=~\"$team\"}",
           "legendFormat": "{{team_id}}",
           "refId": "A"
         }
@@ -358,10 +358,35 @@
   "refresh": "10s",
   "schemaVersion": 39,
   "tags": ["vllm-gateway", "prometheus"],
-  "templating": { "list": [] },
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(gateway_total_requests, team_id)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Team",
+        "multi": true,
+        "name": "team",
+        "options": [],
+        "query": "label_values(gateway_total_requests, team_id)",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
   "time": { "from": "now-15m", "to": "now" },
   "timezone": "browser",
   "title": "Prometheus — Gateway & vLLM (live)",
   "uid": "prometheus-gateway",
-  "version": 1
+  "version": 2
 }
