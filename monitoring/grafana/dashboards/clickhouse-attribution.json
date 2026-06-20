@@ -19,7 +19,7 @@
       "id": 100,
       "options": {
         "code": { "language": "plaintext", "showLineNumbers": false, "showMiniMap": false },
-        "content": "### ClickHouse only\nDatabase: `vllm_attribution`. Per-request rows land in **`request_events`** immediately. Window rollups land in **`request_metrics`** every **15s** (`metrics.emit_interval`). vLLM scrape rows land in **`vllm_system_metrics`** every **15s** (`vllm.metrics_scrape_interval`).\n\nFor live gauges and histograms, use the **Prometheus** dashboard.",
+        "content": "### ClickHouse only\nDatabase: `vllm_attribution`. Per-request rows land in **`request_events`** immediately. Window rollups land in **`request_metrics`** every **15s** (`metrics.emit_interval`). vLLM scrape rows land in **`vllm_system_metrics`** every **15s** (`vllm.metrics_scrape_interval`).\n\n**Historical cost** panels derive USD from token sums and the **`gpu_usd_per_hour`** variable (same formula as live Prometheus: cluster throughput in the selected range → `$ / token` → team attribution). For live 10m gauges, use the **Prometheus** dashboard.",
         "mode": "markdown"
       },
       "title": "About this dashboard",
@@ -105,6 +105,111 @@
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "id": 22,
+      "title": "Historical GPU cost (derived from request_events)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "description": "**Source:** `request_events` token sums for the dashboard time range + **`gpu_usd_per_hour`** variable.\n\n**Formula:** extrapolate cluster tokens in range to tokens/hour, then `usd_per_million = (gpu_usd_per_hour / cluster_tokens_per_hour) × 1e6` (same idea as live `Calculator.USDPerMillionTokens()`).",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "thresholds" }, "unit": "currencyUSD" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 19 },
+      "id": 9,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "WITH\n  toFloat64(${gpu_usd_per_hour}) AS gpu_rate,\n  dateDiff('second', toDateTime($__fromTime), toDateTime($__toTime)) / 3600.0 AS range_hours,\n  (\n    SELECT sum(prompt_tokens + completion_tokens)\n    FROM request_events\n    WHERE $__timeFilter(timestamp)\n      AND match(team_id, '${team:regex}')\n  ) AS cluster_tokens\nSELECT\n  if(cluster_tokens > 0 AND range_hours > 0,\n     (gpu_rate / (cluster_tokens / range_hours)) * 1000000,\n     0) AS usd_per_million_tokens",
+          "refId": "A"
+        }
+      ],
+      "title": "Effective $ / 1M tokens (range)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "description": "**Source:** team token sums × range **`usd_per_token`**, where cluster tokens/hour is extrapolated from all traffic in the dashboard time picker (filtered by **Team**).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "decimals": 4,
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 19 },
+      "id": 10,
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "format": 1,
+          "queryType": "sql",
+          "rawSql": "WITH\n  toFloat64(${gpu_usd_per_hour}) AS gpu_rate,\n  dateDiff('second', toDateTime($__fromTime), toDateTime($__toTime)) / 3600.0 AS range_hours,\n  (\n    SELECT sum(prompt_tokens + completion_tokens)\n    FROM request_events\n    WHERE $__timeFilter(timestamp)\n      AND match(team_id, '${team:regex}')\n  ) AS cluster_tokens,\n  if(cluster_tokens > 0 AND range_hours > 0, gpu_rate / (cluster_tokens / range_hours), 0) AS usd_per_token\nSELECT\n  team_id,\n  round(sum(prompt_tokens + completion_tokens) * usd_per_token, 6) AS estimated_cost_usd\nFROM request_events\nWHERE $__timeFilter(timestamp)\n  AND match(team_id, '${team:regex}')\nGROUP BY team_id\nORDER BY estimated_cost_usd DESC",
+          "refId": "A"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              {
+                "fieldName": "team_id",
+                "handlerKey": "field.name"
+              }
+            ]
+          }
+        }
+      ],
+      "title": "Estimated cost in range (by team)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+      "description": "**Source:** per-bucket team tokens × bucket **`usd_per_token`** (cluster throughput extrapolated from each Grafana time bucket).",
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "currencyUSD" },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 27 },
+      "id": 11,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "format": 0,
+          "queryType": "sql",
+          "rawSql": "WITH\n  toFloat64(${gpu_usd_per_hour}) AS gpu_rate,\n  toFloat64($__interval_s) / 3600.0 AS bucket_hours,\n  team AS (\n    SELECT\n      $__timeInterval(timestamp) AS time,\n      team_id,\n      sum(prompt_tokens + completion_tokens) AS team_tokens\n    FROM request_events\n    WHERE $__timeFilter(timestamp)\n      AND match(team_id, '${team:regex}')\n    GROUP BY time, team_id\n  ),\n  cluster AS (\n    SELECT\n      $__timeInterval(timestamp) AS time,\n      sum(prompt_tokens + completion_tokens) AS cluster_tokens\n    FROM request_events\n    WHERE $__timeFilter(timestamp)\n      AND match(team_id, '${team:regex}')\n    GROUP BY time\n  )\nSELECT\n  team.time,\n  team.team_id,\n  if(cluster.cluster_tokens > 0 AND bucket_hours > 0,\n     round(team.team_tokens * gpu_rate / (cluster.cluster_tokens / bucket_hours), 6),\n     0) AS estimated_cost_usd\nFROM team\nINNER JOIN cluster ON team.time = cluster.time\nORDER BY team.time",
+          "refId": "A"
+        }
+      ],
+      "title": "Estimated cost over time (by team)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
       "id": 20,
       "title": "15s emit window — request_metrics",
       "type": "row"
@@ -116,7 +221,7 @@
         "defaults": { "color": { "mode": "palette-classic" }, "unit": "ms" },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 19 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 36 },
       "id": 4,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom" },
@@ -141,7 +246,7 @@
         "defaults": { "color": { "mode": "palette-classic" }, "unit": "ms" },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 19 },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 36 },
       "id": 8,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom" },
@@ -166,7 +271,7 @@
         "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 19 },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 36 },
       "id": 5,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom" },
@@ -186,7 +291,7 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 44 },
       "id": 21,
       "title": "15s scrape — vllm_system_metrics",
       "type": "row"
@@ -198,7 +303,7 @@
         "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 45 },
       "id": 6,
       "options": {
         "legend": { "displayMode": "list", "placement": "bottom" },
@@ -225,7 +330,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 45 },
       "id": 7,
       "options": {
         "cellHeight": "sm",
@@ -248,10 +353,41 @@
   "refresh": "30s",
   "schemaVersion": 39,
   "tags": ["vllm-gateway", "clickhouse"],
-  "templating": { "list": [] },
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "2.5", "value": "2.5" },
+        "hide": 0,
+        "label": "GPU $/hour",
+        "name": "gpu_usd_per_hour",
+        "options": [{ "selected": true, "text": "2.5", "value": "2.5" }],
+        "query": "2.5",
+        "skipUrlSync": false,
+        "type": "constant"
+      },
+      {
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+        "definition": "SELECT DISTINCT team_id FROM request_events ORDER BY team_id",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Team",
+        "multi": true,
+        "name": "team",
+        "options": [],
+        "query": "SELECT DISTINCT team_id FROM request_events ORDER BY team_id",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
   "time": { "from": "now-6h", "to": "now" },
   "timezone": "browser",
   "title": "ClickHouse — Attribution & history",
   "uid": "clickhouse-attribution",
-  "version": 1
+  "version": 4
 }
